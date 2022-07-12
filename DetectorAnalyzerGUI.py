@@ -21,11 +21,19 @@ from tkinter import filedialog as fd
 import numpy as np
 import sys
 from ZemaxBeamsizePlot import *
+import threading
+import time
 
-sys.path.insert(0,r'N:\SOFTWARE\Python\Beam Profiler Data Analyzer')
-import BeamProfilerDataAnalyzerV4
+# TODO Change to folder
+# sys.path.insert(0,r'N:\SOFTWARE\Python\Beam Profiler Data Analyzer')
+# import BeamProfilerDataAnalyzerV4
 
-class Demo1:
+sys.path.insert(0,r'C:\Users\ryan.robinson\Documents\Git Sandbox\Beam-Image-Analyzer\bia')
+import DataParser as DP
+
+FARFIELD = True
+
+class Application:
     def __init__(self, master):
         self.master = master
         self.frame = tk.Frame(self.master)
@@ -49,15 +57,15 @@ class Demo1:
 
         
         # FILENAME ENTRY BOX
-        defaultFile = r'C:\Users\lab\Documents\Zemax Module Collimator Optics\Module_Collimator_Rev8.00 HeNe Alignment Guide.zmx'
+        defaultFile = r'C:/Users/ryan.robinson/Documents/Git Sandbox/Zemax-Beam-Plot/ZemaxBeamsizePlot/tests/Singe_Emitter_Sensitivity_Analysis.zmx'
         
         self.entry = tk.Entry(self.frame, text = 'Entry', width = minw*5)
         self.entry.insert(0, defaultFile)
-        self.entry.grid(row=r, column=1, columnspan = 5, sticky = 'w')
+        self.entry.grid(row=r, column=1, columnspan = 2, sticky = 'w')
 
         # BROWS FOR FILE
         self.browsButton = tk.Button(self.frame, text = 'Browse', command = self.brows, width = minw)
-        self.browsButton.grid(row = r, column = 6)
+        self.browsButton.grid(row = r, column = 3)
         
         
         ############################## ROW 1 #################################
@@ -82,14 +90,48 @@ class Demo1:
         self.dtrs.grid(row = r, column = 3, sticky = "w")
         
         
+        ########################### RAYTRACE SETTINGINGS #####################
+        
+        # TRACE CONFIG FRAME
+        self.traceFrame = tk.Frame(self.frame)
+        self.traceFrame.rowconfigure([0, 1], minsize=30, weight=1)
+        self.traceFrame.grid(row = 2, column = 0, columnspan = 2, sticky = "EW", padx = 20, pady = 10)
+        traceFrameLabel = tk.Label(self.traceFrame, text = "Raytrace Settings:")
+        traceFrameLabel.grid(row = 0, sticky = "W")
+        
+        # TRACE CONFIG BOX
+        self.traceConf = tk.Frame(self.traceFrame, borderwidth = 2, relief="groove")
+        self.traceConf.rowconfigure([0, 1], minsize=30, weight=1)
+        self.traceConf.columnconfigure([0, 1], minsize=minw, weight=1)
+        self.traceConf.grid(row = 1, sticky = "EW")
+        
+        # VARS
+        self.splitVar = tk.BooleanVar()
+        self.scatterVar = tk.BooleanVar()
+        self.polVar = tk.BooleanVar()
+        self.ignoreErrVar = tk.BooleanVar()
+        self.ignoreErrVar.set(True)
+        
+        # CHECK BOXES
+        splitBox = tk.Checkbutton(self.traceConf, text = "Split Rays", variable = self.splitVar, onvalue = True, offvalue = False)
+        splitBox.grid(row = 0, column = 0, sticky = "W")
+        
+        splitBox = tk.Checkbutton(self.traceConf, text = "Scatter Rays", variable = self.scatterVar, onvalue = True, offvalue = False)
+        splitBox.grid(row = 0, column = 1, sticky = "W")
+        
+        splitBox = tk.Checkbutton(self.traceConf, text = "Use Polarization", variable = self.polVar, onvalue = True, offvalue = False)
+        splitBox.grid(row = 1, column = 0, sticky = "W")
+        
+        splitBox = tk.Checkbutton(self.traceConf, text = "Ignore Errors", variable = self.ignoreErrVar, onvalue = True, offvalue = False)
+        splitBox.grid(row = 1, column = 1, sticky = "W")  
 
         
         ############################## ROW 6 #################################
-        r = 2
+        r = 4
         
         # RUN BUTTON
         self.getButton = tk.Button(self.frame, text = 'Run!', command = self.run, width = minw*4)
-        self.getButton.grid(row=r, column=0, columnspan = 7)
+        self.getButton.grid(row=r, column=0, columnspan = 4, sticky = "EW", padx = 10, pady = 10)
 
         # FINALLY
         self.frame.pack()
@@ -104,109 +146,216 @@ class Demo1:
     
     
     def run(self):
-        print('-------------------------------------------------------------')
-        # GET DETECTOR ENTRY BOX DETAILS
-        rawEntry = self.dtrs.get()
-        tmp = rawEntry.split(',')
-        tmp = np.array(tmp, dtype = int)
-        
-        # SHOW ZEMAX ENTRY BOX DETAILS 
-        print("ZEMAX File:")
-        print(self.entry.get())
-        
-        # SHOW DETECTOR CHECKBOX DETAILS
-        print("Limit Detectors:")
-        print(self.dtrsLim.get())
-        if(self.dtrsLim.get()):
-            print('Detector Objects Being Plotted:')
-            print(tmp)
-        
-        # SAVE DETECTOR ENTRY BOX DETAILS
-        self.dtrsList = tmp
-        print('-------------------------------------------------------------')
-        ######################################################################
-
-        # ZOS API STUFF
-        zosapi = PythonStandaloneApplication()
-        TheSystem = zosapi.TheSystem
-        
-        # ZEMAX FILE TO USE
-        zemaxFile = self.entry.get()
-        
-        # LOAD FILE
-        TheSystem.LoadFile(zemaxFile, False)
-        print(TheSystem.SystemFile)
+        """
+        RUN MEASUREMENT
+        """
+        self.getButton.configure(state = "disabled")
+        self.runThread = threading.Thread(target = self.run3)
+        self.runThread.start()
     
-        # RAYTRACE SETTINGS
-        print('Running ray trace...')
-        NSCRayTrace = TheSystem.Tools.OpenNSCRayTrace()
-        NSCRayTrace.SplitNSCRays = True
-        NSCRayTrace.ScatterNSCRays = False
-        NSCRayTrace.UsePolarization = True
-        NSCRayTrace.IgnoreErrors = True
-        NSCRayTrace.SaveRays = False
-        NSCRayTrace.ClearDetectors(0)
+    def run2(self):
+        """
+        RUN MEASUREMENT USING ZEMAX CLASS
+        """
+        beamWidths = []
+        zemaxFile = self.entry.get()
+        Z = ZemaxMeasurement(zemaxFile)
         
-        # FIND TOTAL NUMBER OF OBJECTS IN THE SYSTEM
-        objNum = TheSystem.NCE.NumberOfObjects
-        print('Total Number of Objects in System: {}'.format(objNum))
+        zCenter = 1.42412288067400000E-01
+        zDelta = 0.005
+        points = 21
+        zs = np.linspace(zCenter-zDelta, zCenter+zDelta, num = points)
+        
+        print(zs)
+        
+        for z in zs:
+            print("Z: {} mm".format(z))
+            Z.zPos(z)
+            Z.rayTrace()
+            Z.parseDetector()
+            beamWidths.append(Z.Y_w)
+        
+        # Z.plotDetector()
+        Z.close()
+        self.getButton.configure(state = "normal")
         
         
-        # RUN RAYTRACE
-        baseTool = CastTo(NSCRayTrace, 'ISystemTool')
-        baseTool.RunAndWaitForCompletion()
-        baseTool.Close()
-        print('Ray trace finished.')
-        print('-------------------------------------------------------------')
+        print(beamWidths)
         
-        # LOOK THROUGH ALL OBJECTS FOR DETECTORS RECTANGLES
-        for i in range(0,objNum):
-            TypeName = TheSystem.NCE.GetObjectAt(i+1).TypeName
-            if(TypeName == "Detector Rectangle" and (not self.dtrsLim.get() or i+1 in self.dtrsList)):
-                
-                # GET DETECTOR RECTANGLE SIZ
-                A,o_x,o_y = parseDetector(TheSystem,i+1)
-                
-                if(np.sum(A) > 0):
-                    # DETECTOR RETANGLE OBJECT NUMBER
-                    det = i+1
-                    
-                    # CREATE BEAM PROFILER OBJECT
-                    BP = BeamProfilerDataAnalyzerV4.BeamProfile(A,o_x*1000,o_y*1000)
-                    
-                    # CALL BEAM PROFILER PLOT METHODS
-                    print('Plotting colorplot for detector object {}'.format(det))
-                    BP.colorPlot(title="Detector Object {} Color Plot".format(det))
-                    print('Plotting knife edge for detector object {}'.format(det))
-                    #BP.knifeEdgePlot(title="Detector Object {} Knife Edge Plot".format(det))
-                    print('')
-        
-        # SHOW PLOTS
+        plt.plot(zs,beamWidths)
+        plt.xlabel("FAC Position (mm)")
+        plt.ylabel("Full Angle Beam Divergence (mrad)")
+        plt.title("FAC Z Sensitivity")
+        plt.grid()
         plt.show()
-        
-        # DELETE ZOS API OBJECTS
-        del zosapi
-        zosapi = None
-
-
-
-        ######################################################################                       
-        
-        
-        
-        print('-------------------------------------------------------------')
-        
-        print('Done!')
-
-        print('-------------------------------------------------------------')
         
         return
 
+    def run3(self):
+        """
+        RUN MEASUREMENT USING ZEMAX CLASS
+        """
+        beamWidths = []
+        zemaxFile = self.entry.get()
+        Z = ZemaxMeasurement(zemaxFile)
+        
+        zCenter = 0
+        zDelta = 0.005
+        points = 21
+        zs = np.linspace(zCenter-zDelta, zCenter+zDelta, num = points)
+        
+        print(zs)
+        
+        for z in zs:
+            print("Y: {} mm".format(z))
+            Z.yPos(z)
+            Z.rayTrace()
+            Z.parseDetector()
+            beamWidths.append(Z.Y)
+        
+        # Z.plotDetector()
+        Z.close()
+        self.getButton.configure(state = "normal")
+        
+        
+        print(beamWidths)
+        zs = zs * 1000
+        plt.plot(zs,beamWidths)
+        plt.xlabel("FAC Y Position (um)")
+        plt.ylabel("FA Beam Pointing (mrad)")
+        plt.title("FAC Y Sensitivity")
+        plt.grid()
+        plt.show()
+        
+        return
+
+class ZemaxMeasurement:
+    def __init__(self, zemaxFile):
+        """
+        SETUP THE ZOS API
+        """
+        # ZOS API STUFF
+        print("Connecting to ZOS API...")
+        self.zosapi = PythonStandaloneApplication()
+        self.TheSystem = self.zosapi.TheSystem
+
+        # LOAD FILE
+        print("Loading ZEMAX file...")
+        self.TheSystem.LoadFile(zemaxFile, False)
+        print(self.TheSystem.SystemFile)    
+    
+        # RAYTRACE SETTINGS
+        print('Running ray trace...')
+        self.NSCRayTrace = self.TheSystem.Tools.OpenNSCRayTrace()
+        self.NSCRayTrace.SplitNSCRays = False #self.splitVar.get()
+        self.NSCRayTrace.ScatterNSCRays = False #self.scatterVar.get()
+        self.NSCRayTrace.UsePolarization = False #self.polVar.get()
+        self.NSCRayTrace.IgnoreErrors = True #self.ignoreErrVar.get()
+        self.NSCRayTrace.SaveRays = False
+        self.NSCRayTrace.ClearDetectors(0)
+        
+        # FIND TOTAL NUMBER OF OBJECTS IN THE SYSTEM
+        self.objNum = self.TheSystem.NCE.NumberOfObjects
+        print('Total Number of Objects in System: {}'.format(self.objNum))
+       
+        self.BP = None
+        return
+    def yPos(self, y, obj = 6):
+        """
+        CHANGE THE Y POSITION OF OBJECT
+        """
+        TheNCE = self.TheSystem.NCE
+        FAC = TheNCE.GetObjectAt(obj)
+        FAC.YPosition = y
+        return
+    
+    def zPos(self, z, obj = 6):
+        """
+        CHANGE THE Z POSITION OF OBJECT
+        """
+        TheNCE = self.TheSystem.NCE
+        FAC = TheNCE.GetObjectAt(obj)
+        FAC.ZPosition = z
+        return
+       
+    def rayTrace(self):
+        """
+        RUN A RAYTRACE
+        """
+        # RAYTRACE SETTINGS
+        print('Running ray trace...')
+  
+        self.NSCRayTrace.ClearDetectors(0)
+        
+        # RUN RAYTRACE
+        self.baseTool = CastTo(self.NSCRayTrace, 'ISystemTool')
+        self.baseTool.RunAndWaitForCompletion()
+        # self.baseTool.Close()
+        time.sleep(1)
+        print('Ray trace finished.')
+        print('-------------------------------------------------------------')
+        return
+
+    def parseDetector(self, detector = 11, lens = 1000000):
+        """
+        GET INFO FROM DETECTOR
+        """
+        
+        TypeName = self.TheSystem.NCE.GetObjectAt(detector).TypeName
+        if(TypeName == "Detector Rectangle"):
+        
+            # GET DETECTOR RECTANGLE SIZE                
+            A,o_x,o_y = parseDetector(self.TheSystem, detector)
+            
+            if(np.sum(A) > 0):
+                
+                # CREATE BEAM PROFILER OBJECT
+                self.BP = DP.BeamProfileFarField(A, o_x*1000, o_y*1000, lens = 1000000)
+                
+                # BEAM PARAMETERS
+                self.X = self.BP.X.center_point/lens
+                self.Y = self.BP.Y.center_point/lens
+                self.X_w = self.BP.X.width/lens
+                self.Y_w = self.BP.Y.width/lens
+                print("X Center: {}, Y Center: {}".format(self.X,self.Y))
+                print("X Width: {}, Y Width: {}".format(self.X_w, self.Y_w))
+                
+            else:
+                print("ERROR: No light on detector")
+        else:
+            print("ERROR: not a detector rectangle object")
+    
+        return
+    
+    def plotDetector(self):
+        """
+        PLOT DETECTORS
+        """
+        detector = 11
+        
+        if(self.BP != None):
+            print('Plotting colorplot for detector object {}'.format(detector))
+            self.BP.colorPlot(title="Detector Object {} Color Plot".format(detector))
+            plt.show()
+            print('')
+        else:
+            print('Beam profile does not exist.')
+        return
+
+    def close(self):
+        """
+        DELETE ZOS API
+        """
+        # DELETE ZOS API OBJECTS
+        self.baseTool.Close()
+        del self.zosapi
+        self.zosapi = None
+        return
 
 def main():
    
     root = tk.Tk()
-    app = Demo1(root)
+    app = Application(root)
     root.mainloop()
 
     return
